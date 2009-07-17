@@ -3,7 +3,7 @@ use Moose::Role;
 use URI ();
 use namespace::autoclean;
 
-our $VERSION = '0.000002';
+our $VERSION = '0.000003';
 
 requires qw/
     base
@@ -33,7 +33,7 @@ __END__
 
 =head1 NAME
 
-Catalyst::TraitFor::Request::ProxyBase -
+Catalyst::TraitFor::Request::ProxyBase - Replace request base with value passed by HTTP proxy
 
 =head1 SYNOPSIS
 
