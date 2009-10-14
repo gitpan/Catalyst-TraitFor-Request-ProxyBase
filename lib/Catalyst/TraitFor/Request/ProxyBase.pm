@@ -3,7 +3,8 @@ use Moose::Role;
 use URI ();
 use namespace::autoclean;
 
-our $VERSION = '0.000003';
+our $VERSION = '0.000004';
+$VERSION = eval $VERSION;
 
 requires qw/
     base
@@ -17,6 +18,19 @@ around 'base' => sub {
         @args = (URI->new($base));
     }
     $self->$orig(@args);
+};
+
+around 'uri' => sub {
+    my ($orig, $self, @args) = @_;
+    my $uri = $self->$orig(@args)->clone;
+    if (my $base = $self->header('X-Request-Base')) {
+      my $proxy_uri = URI->new( $base );
+      $uri->scheme( $proxy_uri->scheme );      
+      my $new_path = $proxy_uri->path . $uri->path;
+      $new_path =~ s|//|/|g;
+      $uri->path( $new_path );
+    }
+    return $uri;
 };
 
 around 'secure' => sub {
@@ -75,6 +89,8 @@ which is expected to be a full URI, for example:
 
 This value will then be used as the base for uris constructed by
 C<< $c->uri_for >>.
+
+In addition the request uri (C<< $c->req->uri >>) will reflect the scheme and path specifed in the header.
 
 =head1 REQUIRED METHODS
 
