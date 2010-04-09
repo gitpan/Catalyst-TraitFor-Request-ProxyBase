@@ -3,7 +3,7 @@ use Moose::Role;
 use URI ();
 use namespace::autoclean;
 
-our $VERSION = '0.000004';
+our $VERSION = '0.000005';
 $VERSION = eval $VERSION;
 
 requires qw/
@@ -11,32 +11,68 @@ requires qw/
     secure
 /;
 
+sub _with_scheme { return $_[0] =~ m/^https?/; }
+
 around 'base' => sub {
     my ($orig, $self, @args) = @_;
-    if (my $base = $self->header('X-Request-Base')) {
-        $base .= '/' unless $base =~ m|/$|;
-        @args = (URI->new($base));
+
+	my $isset = $self->meta->find_attribute_by_name('base')->has_value($self);
+
+    if ( $isset && @args == 0 ) {
+		return $self->$orig(@args);
+    }
+    else {
+        if (my $base = $self->header('X-Request-Base')) {
+            if (_with_scheme($base)) {
+                $base .= '/' unless $base =~ m|/$|;
+                @args = (URI->new($base));
+            }
+            else {
+                my $proxy_base = $self->$orig(@args)->clone();
+                $proxy_base->path( $base . $proxy_base->path() );
+                @args = ( $proxy_base );
+            }
+        }
     }
     $self->$orig(@args);
 };
 
 around 'uri' => sub {
     my ($orig, $self, @args) = @_;
+
+	my $isset = $self->meta->find_attribute_by_name('uri')->has_value($self);
+	if ( $isset && @args == 0 ) {
+		return $self->$orig(@args);
+	}
+
     my $uri = $self->$orig(@args)->clone;
-    if (my $base = $self->header('X-Request-Base')) {
-      my $proxy_uri = URI->new( $base );
-      $uri->scheme( $proxy_uri->scheme );      
-      my $new_path = $proxy_uri->path . $uri->path;
-      $new_path =~ s|//|/|g;
-      $uri->path( $new_path );
+
+    if ( my $base = $self->header('X-Request-Base') ) {
+        if (_with_scheme($base)) {
+            my $proxy_uri = URI->new( $base );
+
+            my $proxy_path = $proxy_uri->path;
+            my $orig_path  = $uri->path;
+
+            $proxy_path =~ s{/$}{} if $orig_path =~ m{^/};
+
+            $uri->scheme( $proxy_uri->scheme );
+            $uri->path( $proxy_path . $orig_path );
+        }
+        else {
+            $uri->path( $base . $uri->path() );
+        }
     }
-    return $uri;
+
+	return $self->$orig( ($uri) );
 };
 
 around 'secure' => sub {
     my ($orig, $self, @args) = @_;
     if (my $base = $self->header('X-Request-Base')) {
-        return URI->new($base)->scheme eq 'http' ? 0 : 1;
+        if (_with_scheme($base)) {
+            return URI->new($base)->scheme eq 'http' ? 0 : 1;
+        }
     }
     $self->$orig(@args);
 };
@@ -112,6 +148,24 @@ In addition the request uri (C<< $c->req->uri >>) will reflect the scheme and pa
 
 =back
 
+=head1 APACHE SETUP
+
+On the frontend Proxy Apache, you would want to enable a Virtualhost config
+somewhat like this. The backend apache config stays unchanged.
+
+    <Virtualhost *:80>
+        ProxyRequests Off
+
+        <Location /preview>
+            # You must have mod_headers enabled for that
+            # RequestHeader set X-Request-Base /preview
+            RequestHeader set X-Request-Base http://www.example.com/preview
+        </Location>
+
+        ProxyPass /preview http://my.vpn.host/
+        ProxyPassReverse /preview http://my.vpn.host/
+    </Virtualhost>
+
 =head1 BUGS
 
 Probably. Patches welcome, please fork from:
@@ -120,9 +174,13 @@ Probably. Patches welcome, please fork from:
 
 and send a pull request.
 
-=head1 AUTHOR
+=head1 AUTHORS
 
 Tomas Doran (t0m) C<< <bobtfish@bobtfish.net> >>
+
+=head1 CONTRIBUTORS
+
+Klaus Ita (koki) C<< <klaus@worstofall.com> >>
 
 =head1 COPYRIGHT
 
